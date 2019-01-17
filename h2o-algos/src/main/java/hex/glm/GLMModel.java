@@ -501,31 +501,7 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
           throw new RuntimeException("unexpected link function id  " + this);
       }
     }
-
-    public final double linkInvDeriv(double x) {
-      switch(_link) {
-        case identity:
-          return 1;
-        case logit:
-          double g = Math.exp(-x);
-          double gg = (g + 1) * (g + 1);
-          return g / gg;
-        case ologit:
-          return (x-x*x);
-        case log:
-          //return (x == 0)?MAX_SQRT:1/x;
-          return Math.max(Math.exp(x), Double.MIN_NORMAL);
-        case inverse:
-          double xx = (x < 0) ? Math.min(-1e-5, x) : Math.max(1e-5, x);
-          return -1 / (xx * xx);
-//        case tweedie:
-//          double vp = (1. - _tweedie_link_power) / _tweedie_link_power;
-//          return (1/ _tweedie_link_power) * Math.pow(x, vp);
-        default:
-          throw new RuntimeException("unexpected link function id  " + this);
-      }
-    }
-
+    
     // supported families
     public enum Family {
       gaussian(Link.identity), binomial(Link.logit), quasibinomial(Link.logit),poisson(Link.log),
@@ -606,6 +582,42 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
           throw new RuntimeException("unknown link function " + this);
       }
     }
+    
+    public final double linkInvDeriv(double x) {
+      switch(_link) {
+        case identity:
+          return 1;
+        case logit:
+          double g = Math.exp(-x);
+          double gg = (g + 1) * (g + 1);
+          return g / gg;
+        case ologit:
+          return (x-x*x);
+        case log:
+          return Math.max(x, Double.MIN_NORMAL);
+        case inverse:
+          double xx = (x < 0) ? Math.min(-1e-5, x) : Math.max(1e-5, x);
+          return -1 / (xx * xx);
+//        case tweedie:
+//          double vp = (1. - _tweedie_link_power) / _tweedie_link_power;
+//          return (1/ _tweedie_link_power) * Math.pow(x, vp);
+        default:
+          throw new RuntimeException("unexpected link function id  " + this);
+      }
+    }
+
+
+    public final double linkInvDeriv2(double x) {
+      switch(_link) {
+        case identity:
+          return 0;
+        case log:
+          return Math.max(x, Double.MIN_NORMAL);
+        default:
+          throw new RuntimeException("unexpected link function id  " + this);
+      }
+    }
+
 
     // calculate the derivative of the link function
     public final double linkDeriv(double x) { // note: compute an inverse of what R does
@@ -699,8 +711,7 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
           return 2 * ((yr * Math.log(yr / ym)) - (yr - ym));
         case negbinomial:
           ym = ym>0?ym:1e-12;
-          return (_link.equals(Link.log)?(2*(_invTheta*Math.log(yr/ym)+(yr+_invTheta)*Math.log((yr+_invTheta)/(yr+_invTheta)))):
-                  (2*(_invTheta*Math.log(yr/ym)+(yr+_invTheta)*Math.log((ym+_invTheta)/(yr+_invTheta)))));
+          return 2*(_invTheta*Math.log(ym/yr)+(yr+_invTheta)*Math.log((ym+_invTheta)/(yr+_invTheta)));
         case gamma:
           if( yr == 0 ) return -2;
           return -2 * (Math.log(yr / ym) - (yr - ym) / ym);
@@ -741,7 +752,7 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
         case gamma:
         case tweedie:
           x.dev = w*deviance(yr,ym);
-          x.l = x.dev;
+          x.l = x.dev; // todo: verify that this is not true for Poisson distribution
           break;
         case negbinomial:
           x.dev = w*deviance(yr,ym);
@@ -770,7 +781,7 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
           if (yr == 0) return 2 * ym;
           return 2 * ((yr * Math.log(yr / ym)) - (yr - ym));
         case negbinomial:
-          return (_link.equals(Link.log)?(_invTheta*ym-(yr+_invTheta)*Math.log(ym+_invTheta)):(_invTheta*Math.log(ym)-(ym+_invTheta)*Math.log(ym+_invTheta)));
+          return (_invTheta*Math.log(ym)-(yr+_invTheta)*Math.log(ym+_invTheta));
         case gamma:
           if (yr == 0) return -2;
           return -2 * (Math.log(yr / ym) - (yr - ym) / ym);
@@ -784,10 +795,18 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
     public GLMWeights computeWeights(double y, double eta, double off, double w, GLMWeights x) {
       double etaOff = eta + off;
       x.mu = linkInv(etaOff);
+      x.mu = x.mu==0?hex.glm.GLMTask.EPS:x.mu;
       double var = variance(x.mu);//Math.max(1e-5, variance(x.mu)); // avoid numerical problems with 0 variance
       double d = linkDeriv(x.mu);
-      x.w = w / (var * d * d);
-      x.z = eta + (y - x.mu) * d;
+      if (_family.equals(Family.negbinomial)) {
+        double sumr = y+_invTheta;
+        double sum = x.mu+_invTheta;
+        x.w = w*((sumr/(sum*sum)-_invTheta/y*y)*linkInvDeriv(x.mu)+(sumr/sum-_invTheta/x.mu)*linkInvDeriv2(x.mu));
+        x.z = eta + (y-x.mu)/x.w;
+      } else {
+        x.w = w / (var * d * d);  // formula did not quite work with negative binomial
+        x.z = eta + (y - x.mu) * d;
+      }
       likelihoodAndDeviance(y,x,w);
       return x;
     }

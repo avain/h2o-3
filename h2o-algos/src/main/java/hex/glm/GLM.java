@@ -1934,10 +1934,8 @@ public class GLM extends ModelBuilder<GLMModel,GLMParameters,GLMOutput> {
         else if(_parms._family == Family.gaussian && _parms._link == Link.identity)
           gt = new GLMGaussianGradientTask(_job == null?null:_job._key,_dinfo,_parms,_l2pen, beta).doAll(_dinfo._adaptedFrame);
         else if (_parms._family.equals(Family.negbinomial))
-          gt = _parms._link == Link.log? (new GLMNegBinomialGradientLogTask(_job == null?null:_job._key,_dinfo,
-                  _parms,_l2pen, beta).doAll(_dinfo._adaptedFrame))
-                  :(new GLMNegBinomialGradientIdentityTask(_job == null?null:_job._key,_dinfo,_parms,_l2pen,
-                  beta).doAll(_dinfo._adaptedFrame));
+          gt =  new GLMNegBinomialGradientTask(_job == null?null:_job._key,_dinfo,
+                  _parms,_l2pen, beta).doAll(_dinfo._adaptedFrame);
         else if(_parms._family == Family.poisson && _parms._link == Link.log)
           gt = new GLMPoissonGradientTask(_job == null?null:_job._key,_dinfo,_parms,_l2pen, beta).doAll(_dinfo._adaptedFrame);
         else if(_parms._family == Family.quasibinomial)

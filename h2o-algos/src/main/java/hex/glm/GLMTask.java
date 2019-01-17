@@ -31,6 +31,7 @@ import java.util.Arrays;
  * @author tomasnykodym
  */
 public abstract class GLMTask  {
+  final static double EPS=1e-20;
   static class NullDevTask extends MRTask<NullDevTask> {
     double _nullDev;
     final double [] _ymu;
@@ -713,7 +714,7 @@ public abstract class GLMTask  {
           double mu = Math.exp(eta);
           double yr = ys[i];
           double diff = mu - yr;
-          l += ws[i] * (yr == 0?mu:yr*Math.log(yr/mu) + diff);
+          l += ws[i] * (yr == 0?mu:yr*Math.log(yr/mu) + diff);  // todo: looks wrong to me... double check
           es[i] = ws[i]*diff;
         }
       }
@@ -721,49 +722,27 @@ public abstract class GLMTask  {
     }
   }
 
-  static class GLMNegBinomialGradientIdentityTask extends GLMGradientTask {
+  static class GLMNegBinomialGradientTask extends GLMGradientTask {
     private final GLMWeightsFun _glmf;
-    public GLMNegBinomialGradientIdentityTask(Key jobKey, DataInfo dinfo, GLMParameters parms, double lambda, double[] beta) {
+    public GLMNegBinomialGradientTask(Key jobKey, DataInfo dinfo, GLMParameters parms, double lambda, double[] beta) {
       super(jobKey, dinfo, parms._obj_reg, lambda, beta);
       _glmf = new GLMWeightsFun(parms);
     }
-    @Override protected void computeGradientMultipliers(double [] es, double [] ys, double [] ws){
+    @Override protected void computeGradientMultipliers(double [] es, double [] ys, double [] ws) {
       double l = 0;
       for(int i = 0; i < es.length; ++i) {
         if (Double.isNaN(ys[i]) || ws[i] == 0) {
           es[i] = 0;
         } else {
           double eta = es[i];
-          double mu = eta>0?eta:1e-12;  // avoid divide by zero here
+          double mu = _glmf.linkInv(eta);
+          mu = mu==0?EPS:mu;
           double yr = ys[i];
-          double sum = mu + yr;
-          es[i] = ws[i]*(_glmf._invTheta/mu-sum/(mu+_glmf._invTheta));
-          l += ws[i] * (_glmf._invTheta*Math.log(mu)-sum*Math.log(mu+_glmf._invTheta));
-        }
-      }
-      _likelihood = l;
-    }
-  }
-
-
-  static class GLMNegBinomialGradientLogTask extends GLMGradientTask {
-    private final GLMWeightsFun _glmf;
-    public GLMNegBinomialGradientLogTask(Key jobKey, DataInfo dinfo, GLMParameters parms, double lambda, double[] beta) {
-      super(jobKey, dinfo, parms._obj_reg, lambda, beta);
-      _glmf = new GLMWeightsFun(parms);
-    }
-    @Override protected void computeGradientMultipliers(double [] es, double [] ys, double [] ws){
-      double l = 0;
-      for(int i = 0; i < es.length; ++i) {
-        if (Double.isNaN(ys[i]) || ws[i] == 0) {
-          es[i] = 0;
-        } else {
-          double eta = es[i];
-          double mu = Math.exp(eta);
-          double yr = ys[i];
-          double sum = mu + yr;
-          es[i] = ws[i]*(_glmf._invTheta-sum*mu/(mu+_glmf._invTheta));
-          l += ws[i] * (_glmf._invTheta*mu-sum*Math.log(mu+_glmf._invTheta));
+          double sum = mu + _glmf._invTheta;
+          double sumr = yr + _glmf._invTheta;
+          double muDeriv = _glmf.linkInvDeriv(mu);
+          es[i] = ws[i]*(sumr/sum-_glmf._invTheta/mu)*muDeriv; // gradient of -llh
+          l += ws[i] * (sumr*Math.log(sum)-_glmf._invTheta*Math.log(mu)); // store the -llh
         }
       }
       _likelihood = l;
@@ -1632,7 +1611,7 @@ public abstract class GLMTask  {
         w  = r.weight * d;
       } else if(_beta != null) {
         _glmf.computeWeights(y, r.innerProduct(_beta) + _sparseOffset, r.offset, r.weight, _w);
-        w = _w.w;
+        w = _w.w; // hessian without the xij xik part
         wz = w*_w.z;
         _likelihood += _w.l;
       } else {
